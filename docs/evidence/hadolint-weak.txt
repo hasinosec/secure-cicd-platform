@@ -1,0 +1,7 @@
+$ hadolint Dockerfile.weak
+Dockerfile.weak:5 DL3064 warning: Potentially sensitive data should not be used in the `ARG` or `ENV` commands
+Dockerfile.weak:6 DL3064 warning: Potentially sensitive data should not be used in the `ARG` or `ENV` commands
+Dockerfile.weak:7 DL3064 warning: Potentially sensitive data should not be used in the `ARG` or `ENV` commands
+Dockerfile.weak:11 DL3042 warning: Avoid use of cache directory with pip. Use `pip install --no-cache-dir <package>`
+Dockerfile.weak:14 DL3025 warning: Use arguments JSON notation for CMD and ENTRYPOINT arguments
+exit=1

@@ -1,0 +1,3 @@
+$ conftest test --policy policy --namespace dockerfile Dockerfile.weak
+Error: unknown command "Dockerfile.weak" for "conftest"
+Run 'conftest --help' for usage.

@@ -1,0 +1,42 @@
+[
+ {
+  "Description": "AWS",
+  "StartLine": 10,
+  "EndLine": 10,
+  "StartColumn": 24,
+  "EndColumn": 43,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "Dockerfile.weak.scan",
+  "SymlinkFile": "",
+  "Commit": "",
+  "Entropy": 4.0219283,
+  "Author": "",
+  "Email": "",
+  "Date": "",
+  "Message": "",
+  "Tags": [],
+  "RuleID": "aws-access-token",
+  "Fingerprint": "Dockerfile.weak.scan:aws-access-token:10"
+ },
+ {
+  "Description": "Generic API Key",
+  "StartLine": 11,
+  "EndLine": 12,
+  "StartColumn": 10,
+  "EndColumn": 1,
+  "Match": "SECRET_ACCESS_KEY=REDACTED",
+  "Secret": "REDACTED",
+  "File": "Dockerfile.weak.scan",
+  "SymlinkFile": "",
+  "Commit": "",
+  "Entropy": 4.634184,
+  "Author": "",
+  "Email": "",
+  "Date": "",
+  "Message": "",
+  "Tags": [],
+  "RuleID": "generic-api-key",
+  "Fingerprint": "Dockerfile.weak.scan:generic-api-key:11"
+ }
+]

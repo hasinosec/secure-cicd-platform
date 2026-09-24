@@ -1,0 +1,32 @@
+# This repository runs its own pipeline against itself.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install --no-cache-dir -r app/requirements.txt pytest==8.3.4
+      - run: pytest -q
+
+  security:
+    name: security
+    uses: ./.github/workflows/security.yml
+    with:
+      dockerfile: Dockerfile
+      image-name: demo-service
+      scan-iac: true

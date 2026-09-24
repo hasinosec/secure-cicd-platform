@@ -1,0 +1,219 @@
+# Reusable security pipeline.
+#
+# Any repository can call this with:
+#
+#   jobs:
+#     security:
+#       uses: hasinosec/secure-cicd-platform/.github/workflows/security.yml@main
+#       with:
+#         image-name: my-service
+#
+# Design rules applied here:
+#   - every third-party action is pinned to a full commit SHA, not a tag
+#   - permissions are least-privilege and declared per job, never at the top
+#   - CLIs are installed from their official release/script rather than via a
+#     third-party wrapper action, because wrapper actions break on transitive
+#     deprecations and pin badly
+#   - every stage uploads SARIF so findings land in the GitHub Security tab
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version used for SAST and dependency scanning.
+        type: string
+        default: "3.12"
+      dockerfile:
+        description: Dockerfile to build and scan.
+        type: string
+        default: Dockerfile
+      image-name:
+        description: Local tag for the image under test.
+        type: string
+        default: app
+      severity-gate:
+        description: Container severities that fail the build.
+        type: string
+        default: CRITICAL,HIGH
+      scan-iac:
+        description: Run Checkov over infrastructure code.
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  secrets:
+    name: secrets (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          VER=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan history and working tree
+        run: gitleaks detect --source . --redact --verbose
+
+  lint-dockerfile:
+    name: dockerfile lint (hadolint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install hadolint
+        run: |
+          curl -sSfL -o /usr/local/bin/hadolint \
+            https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x /usr/local/bin/hadolint
+      - name: Lint
+        run: hadolint "${{ inputs.dockerfile }}"
+
+  sast:
+    name: sast (semgrep)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - run: pip install --no-cache-dir semgrep==1.97.0
+      - name: Run semgrep
+        run: semgrep scan --config p/security-audit --config p/secrets --sarif -o semgrep.sarif .
+      - name: Fail on findings
+        run: semgrep scan --config p/security-audit --error --quiet .
+      - uses: github/codeql-action/upload-sarif@f09c1c0a94de965c15400f5634aa42fac8fb8f88 # v3.27.5
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  dependencies:
+    name: dependencies (pip-audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - run: pip install --no-cache-dir pip-audit==2.7.3
+      - name: Audit declared dependencies
+        run: pip-audit --strict --requirement app/requirements.txt
+
+  iac:
+    name: iac (checkov)
+    if: inputs.scan-iac
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - run: pip install --no-cache-dir checkov==3.2.334
+      - name: Scan IaC and Dockerfiles
+        run: checkov --directory . --output cli --output sarif --output-file-path console,checkov.sarif --compact
+      - uses: github/codeql-action/upload-sarif@f09c1c0a94de965c15400f5634aa42fac8fb8f88 # v3.27.5
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  container:
+    name: container (trivy + syft)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build image
+        run: docker build -f "${{ inputs.dockerfile }}" -t "${{ inputs.image-name }}:ci" .
+      - name: Install trivy
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.58.1
+          trivy --version
+      - name: Install syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+      - name: Generate SBOM
+        run: syft "${{ inputs.image-name }}:ci" -o spdx-json > sbom.spdx.json
+      - name: Scan image (report)
+        run: trivy image --format sarif --output trivy.sarif "${{ inputs.image-name }}:ci"
+      - name: Scan image (gate)
+        run: |
+          trivy image --exit-code 1 --ignore-unfixed \
+            --severity "${{ inputs.severity-gate }}" "${{ inputs.image-name }}:ci"
+      - uses: github/codeql-action/upload-sarif@f09c1c0a94de965c15400f5634aa42fac8fb8f88 # v3.27.5
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  policy:
+    name: policy gate (conftest)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install conftest
+        run: |
+          VER=0.56.0
+          curl -sSfL "https://github.com/open-policy-agent/conftest/releases/download/v${VER}/conftest_${VER}_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin conftest
+          conftest --version
+      - name: Policy unit tests
+        run: conftest verify --policy policy
+      - name: Enforce Dockerfile policy
+        run: conftest test --policy policy --namespace dockerfile "${{ inputs.dockerfile }}"
+      - name: Enforce workflow pinning policy
+        run: conftest test --policy policy --namespace workflow .github/workflows/*.yml
+
+  gate:
+    name: security gate
+    needs: [secrets, lint-dockerfile, sast, dependencies, iac, container, policy]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any stage failed
+        run: |
+          echo "secrets:      ${{ needs.secrets.result }}"
+          echo "dockerfile:   ${{ needs.lint-dockerfile.result }}"
+          echo "sast:         ${{ needs.sast.result }}"
+          echo "dependencies: ${{ needs.dependencies.result }}"
+          echo "iac:          ${{ needs.iac.result }}"
+          echo "container:    ${{ needs.container.result }}"
+          echo "policy:       ${{ needs.policy.result }}"
+          for r in "${{ needs.secrets.result }}" "${{ needs.lint-dockerfile.result }}" \
+                   "${{ needs.sast.result }}" "${{ needs.dependencies.result }}" \
+                   "${{ needs.iac.result }}" "${{ needs.container.result }}" \
+                   "${{ needs.policy.result }}"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::security gate failed"; exit 1
+            fi
+          done
+          echo "all security stages passed"

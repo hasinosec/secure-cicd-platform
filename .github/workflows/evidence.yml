@@ -1,0 +1,71 @@
+# Proof that the gates are real.
+#
+# Each step below runs a scanner against the DELIBERATELY WEAK build and asserts
+# that it exits non-zero. A pipeline that has never failed proves nothing, so
+# this workflow fails if the weak build is ever allowed through.
+name: evidence
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gates-must-fire:
+    name: weak build must be rejected
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install scanners
+        run: |
+          curl -sSfL -o /usr/local/bin/hadolint \
+            https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x /usr/local/bin/hadolint
+          VER=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+
+      - name: hadolint must reject Dockerfile.weak
+        run: |
+          if hadolint Dockerfile.weak; then
+            echo "::error::hadolint accepted the weak Dockerfile - the gate is not working"
+            exit 1
+          fi
+          echo "hadolint correctly rejected Dockerfile.weak"
+
+      - name: hadolint must accept the hardened Dockerfile
+        run: hadolint Dockerfile
+
+      - name: Build the insecure fixture
+        # No credential-shaped string is committed to this repository; the
+        # fixture is synthesised here so GitHub push protection never has to be
+        # overridden. See scripts/plant-test-secret.sh.
+        run: ./scripts/plant-test-secret.sh
+
+      - name: gitleaks must find the planted credentials
+        run: |
+          if gitleaks detect --source . --no-git --redact --exit-code 1; then
+            echo "::error::gitleaks found no secrets - the gate is not working"
+            exit 1
+          fi
+          echo "gitleaks correctly detected the planted credentials"
+
+      - name: conftest must reject the weak Dockerfile
+        run: |
+          VER=0.56.0
+          curl -sSfL "https://github.com/open-policy-agent/conftest/releases/download/v${VER}/conftest_${VER}_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin conftest
+          conftest verify --policy policy
+          if conftest test --policy policy --namespace dockerfile Dockerfile.weak; then
+            echo "::error::policy accepted the weak Dockerfile - the gate is not working"
+            exit 1
+          fi
+          echo "conftest correctly rejected Dockerfile.weak"
+          conftest test --policy policy --namespace dockerfile Dockerfile

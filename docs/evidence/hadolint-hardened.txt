@@ -1,0 +1,2 @@
+$ hadolint Dockerfile
+exit=0
