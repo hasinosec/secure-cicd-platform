@@ -1,0 +1,18 @@
+# Deliberately insecure baseline. Used to prove the pipeline gates actually fire.
+# Never deploy this image.
+#
+# The two __TEST_*__ placeholders are filled in by scripts/plant-test-secret.sh
+# at scan time. No credential-shaped string is ever committed to this repository
+# -- see the "Real problems hit while building this" section of the README.
+FROM python:3.11
+
+ENV DB_PASSWORD=SuperSecret123
+ENV AWS_ACCESS_KEY_ID=__TEST_AWS_ACCESS_KEY_ID__
+ENV AWS_SECRET_ACCESS_KEY=__TEST_AWS_SECRET_ACCESS_KEY__
+
+WORKDIR /app
+COPY . .
+RUN pip install -r app/requirements.txt
+
+EXPOSE 8000
+CMD python app/app.py

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.sbom.json
+.scan-tmp/
+Dockerfile.weak.scan
