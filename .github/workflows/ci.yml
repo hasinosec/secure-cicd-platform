@@ -26,6 +26,13 @@ jobs:
   security:
     name: security
     uses: ./.github/workflows/security.yml
+    # A reusable workflow can never hold more than its caller grants. This
+    # workflow's top-level ceiling is `permissions: {}`, so the SARIF-uploading
+    # jobs inside security.yml have to be granted here at the call site --
+    # otherwise Actions rejects the run before it starts (startup_failure).
+    permissions:
+      contents: read
+      security-events: write
     with:
       dockerfile: Dockerfile
       image-name: demo-service
