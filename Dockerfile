@@ -6,6 +6,21 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.13-slim
 RUN useradd --system --uid 10001 --no-create-home appuser
+
+# Strip the build toolchain out of the runtime image.
+#
+# pip and setuptools are build-time tools; nothing in this service imports them
+# at runtime. Leaving them in shipped two HIGH findings that had nothing to do
+# with the application: CVE-2025-47273 in setuptools 70.3.0, and
+# GHSA-6v7p-g79w-8964 in the msgpack copy that pip vendors. Removing them fixes
+# both and removes a package installer from a container an attacker might reach.
+RUN rm -rf /usr/local/lib/python3.13/site-packages/pip \
+	/usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+	/usr/local/lib/python3.13/site-packages/setuptools \
+	/usr/local/lib/python3.13/site-packages/setuptools-*.dist-info \
+	/usr/local/lib/python3.13/site-packages/pkg_resources \
+	/usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13
+
 COPY --from=build /install /usr/local
 WORKDIR /app
 COPY --chown=appuser:appuser app/ ./app/
