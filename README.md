@@ -97,6 +97,9 @@ ever accepted**. Raw output is in `docs/evidence/`.
 | hadolint | **5 findings, exit 1** | **0 findings, exit 0** |
 | gitleaks | **2 secrets detected** | clean |
 | conftest policy | **4 failures, 1 warning** | **7 rules, 7 passed** |
+| checkov | excluded (fixture) | **244 passed, 0 failed** |
+| trivy (fixable HIGH/CRITICAL) | not built | **0**, image 183 MB |
+| runtime user | root | **uid 10001, pip removed** |
 
 ```
 $ conftest test --policy policy --namespace dockerfile Dockerfile.weak
@@ -115,6 +118,52 @@ time, so the scanners get a genuine pattern to detect while the repository stays
 clean. Run it yourself: `./scripts/plant-test-secret.sh`.
 
 ## Real problems hit while building this
+
+Every one of these was found by running the pipeline, not by reading about it.
+The first run of this repository's own CI failed **four** jobs.
+
+**The reusable workflow could not start at all.** `ci.yml` declared
+`permissions: {}` as its ceiling, then called `security.yml`, whose jobs request
+`security-events: write` to upload SARIF. A called workflow can never hold more
+than its caller grants, so Actions rejected the run with `startup_failure`
+before executing a single step -- and produced no log to read. Fixed by granting
+`contents: read` and `security-events: write` at the call site.
+
+**pip-audit found five real CVEs in my own pinned dependencies.** `flask 3.1.0`
+(PYSEC-2026-1377, PYSEC-2026-2151) and `werkzeug 3.1.3` (PYSEC-2026-2046,
+-2044, -2320). Bumped to `flask 3.1.3` and `werkzeug 3.1.6`; tests still pass.
+The gate worked on its first run, against its own author.
+
+**Checkov parsed a Rego policy file as a Dockerfile.** `policy/dockerfile.rego`
+matched Checkov's `Dockerfile.*` filename pattern, so it was scanned as a
+container definition and failed `CKV_DOCKER_2` and `CKV_DOCKER_3` for having no
+`USER` and no `HEALTHCHECK`. Renaming it to `policy/docker.rego` removes the
+false positive permanently, which is better than a suppression comment that
+would outlive the reason for it. Checkov also flagged `Dockerfile.weak`
+correctly -- that file is the deliberately insecure fixture, so it is now
+excluded with `--skip-path`, and its findings are asserted in the `evidence`
+workflow instead.
+
+**Semgrep crashed before scanning anything.** `ModuleNotFoundError: No module
+named 'pkg_resources'` -- Python 3.12 no longer ships setuptools, and semgrep's
+opentelemetry dependency still imports `pkg_resources` at startup. Fixed by
+installing `setuptools` explicitly alongside semgrep.
+
+**A pinned tool version did not exist.** Trivy was pinned to `v0.58.1`. The
+install script printed `found version: 0.58.1`, then exited 1 -- the release is
+gone upstream (`GET /releases/tags/v0.58.1` returns 404), so the download 404'd
+while the message said the version had been found. Repinned to `v0.74.0` and
+`syft v1.52.0`, both verified to resolve. **Pinning is correct; pinning without
+verifying the pin still resolves is not.**
+
+**The image shipped two HIGH CVEs that had nothing to do with the application.**
+Trivy flagged `setuptools 70.3.0` (CVE-2025-47273) and `msgpack 1.1.2`
+(GHSA-6v7p-g79w-8964) -- the latter vendored inside pip. Both are build-time
+tooling with no runtime purpose in this service. Rather than upgrade them, the
+final stage now deletes pip, setuptools and `pkg_resources` outright: it clears
+both findings *and* removes a package installer from a container an attacker
+might reach. Result: **0 fixable HIGH/CRITICAL**, image 183 MB.
+
 
 **GitHub push protection blocked my own test fixture — correctly.** The first
 push was rejected: `GH013: Repository rule violations found`, flagging an

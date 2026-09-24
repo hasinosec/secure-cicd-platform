@@ -1,0 +1,3 @@
+$ checkov --directory . --skip-path 'Dockerfile\.weak.*' --compact
+Passed checks: 60, Failed checks: 0, Skipped checks: 0
+Passed checks: 244, Failed checks: 0, Skipped checks: 0

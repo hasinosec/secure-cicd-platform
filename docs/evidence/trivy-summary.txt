@@ -1,0 +1,5 @@
+$ trivy image --ignore-unfixed --severity CRITICAL,HIGH demo-service
+0 fixable HIGH/CRITICAL findings (exit 0)
+image size: 183MB
+runtime user: uid=10001(appuser)
+pip/setuptools: removed from final stage
